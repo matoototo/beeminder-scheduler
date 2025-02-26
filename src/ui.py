@@ -3,12 +3,14 @@ UI Utilities for Beeminder Scheduler
 Common UI components and display functions
 """
 
+import re
 import os
 import json
 from typing import Dict, List
-from datetime import datetime
+from datetime import datetime, timedelta
 import colorama
 from prompt_toolkit import prompt
+from rich.markdown import Markdown
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -177,3 +179,101 @@ def display_requirements(requirements: Dict) -> None:
 
     console.print(table)
     console.print(f"[bold]Total hours needed today:[/bold] [cyan]{total_hours:.1f}[/cyan]")
+
+def display_schedule(schedule_text: str) -> None:
+    """Display a schedule with elegant formatting and time calculations"""
+    total_duration = timedelta()
+    activity_durations = {}
+
+    time_pattern = r'(\d{1,2}:\d{2} [AP]M) - (\d{1,2}:\d{2} [AP]M): (.*?)(\((.*?)\))?$'
+
+    for line in schedule_text.split('\n'):
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+
+        # Handle markdown list items format from LLM output
+        if line.startswith('- '):
+            line = line[2:].strip()
+
+        match = re.search(time_pattern, line)
+        if match:
+            start_time_str, end_time_str, activity, _, goal_name = match.groups()
+
+            # Parse start and end times
+            try:
+                start_time = datetime.strptime(start_time_str, "%I:%M %p")
+                end_time = datetime.strptime(end_time_str, "%I:%M %p")
+
+                # Handle end time being on the next day
+                if end_time < start_time:
+                    end_time = end_time + timedelta(days=1)
+
+                duration = end_time - start_time
+                total_duration += duration
+
+                # Track time per activity type
+                goal_name = goal_name or ""  # Ensure goal_name is not None
+                if goal_name:
+                    activity_durations[goal_name] = activity_durations.get(goal_name, timedelta()) + duration
+            except ValueError:
+                pass  # Just skip time calculation if we can't parse the time
+
+    # Get current date for the panel title
+    today = datetime.now().strftime("%A, %B %d")
+
+    # Display the schedule as markdown - safer approach
+    console.print(Panel(
+        Markdown(schedule_text),
+        title=f"[bold]Schedule for {today}[/bold]",
+        border_style="green",
+        box=box.ROUNDED
+    ))
+
+    # Calculate grand total duration
+    hours, remainder = divmod(total_duration.seconds, 3600)
+    minutes = remainder // 60
+    total_duration_str = f"{hours}h {minutes:02d}m"
+
+    # Print summary statistics
+    console.print(f"\n[bold]Total scheduled time:[/bold] [cyan]{total_duration_str}[/cyan]")
+
+    # Show time per goal in a properly boxed table with tasteful colors
+    if activity_durations:
+        # Create a table using Rich's Table
+        from rich.table import Table
+
+        summary_table = Table(
+            title="Time Allocation",
+            box=box.ROUNDED,
+            show_header=True,
+            header_style="bold cyan",
+            border_style="cyan"
+        )
+
+        summary_table.add_column("Goal")
+        summary_table.add_column("Hours", justify="right")
+        summary_table.add_column("Percentage", justify="right")
+
+        for goal, duration in sorted(activity_durations.items(), key=lambda x: x[1], reverse=True):
+            hours, remainder = divmod(duration.seconds, 3600)
+            minutes = remainder // 60
+            duration_str = f"{hours}h {minutes:02d}m"
+
+            percentage = (duration.seconds / total_duration.seconds) * 100 if total_duration.seconds > 0 else 0
+
+            style = None
+            if "lunch" in goal.lower() or "break" in goal.lower():
+                style = "dim"
+            elif "important" in goal.lower() or "urgent" in goal.lower():
+                style = "bold"
+
+            summary_table.add_row(
+                goal,
+                duration_str,
+                f"{percentage:.1f}%",
+                style=style
+            )
+
+        console.print("\n")
+        console.print(summary_table)

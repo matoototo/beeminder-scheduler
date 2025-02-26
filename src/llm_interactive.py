@@ -10,13 +10,11 @@ from prompt_toolkit import prompt
 from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit.history import FileHistory
 from rich.panel import Panel
-from rich.markdown import Markdown
-from rich import box
 
 from beeminder_api import BeeminderAPI
 from scheduler import BeeminderScheduler
 from llm_scheduler import LLMScheduler
-from ui import console
+from ui import console, display_schedule
 
 def start_llm_interactive_mode(api: BeeminderAPI, scheduler: BeeminderScheduler) -> None:
     try:
@@ -148,12 +146,7 @@ def generate_daily_schedule(llm_scheduler: LLMScheduler) -> None:
         user_preferences
     )
 
-    console.print(Panel(
-        Markdown(schedule),
-        title="Your Daily Schedule",
-        border_style="green",
-        box=box.ROUNDED
-    ))
+    display_schedule(schedule)
 
     while True:
         console.print("\n[bold]Would you like to refine this schedule?[/bold]")
@@ -177,12 +170,7 @@ def generate_daily_schedule(llm_scheduler: LLMScheduler) -> None:
         console.print("\n[bold]Refining your schedule...[/bold]")
         schedule = llm_scheduler.refine_schedule(schedule, feedback_text)
 
-        console.print(Panel(
-            Markdown(schedule),
-            title="Your Refined Schedule",
-            border_style="green",
-            box=box.ROUNDED
-        ))
+        display_schedule(schedule)
 
     console.print("\n[dim]Schedule generation complete.[/dim]")
     prompt("\nPress Enter to continue... ")

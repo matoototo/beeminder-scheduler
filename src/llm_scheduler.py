@@ -43,13 +43,15 @@ class LLMScheduler:
     def _get_default_prompt(self) -> str:
         return textwrap.dedent("""\
             You are a scheduling assistant that creates daily schedules based on Beeminder goals.
-            Create a realistic, hour-by-hour schedule for TODAY based on the requirements.
+            Create a realistic, hour-by-hour schedule for TODAY based on the requirements. Include breaks!!
 
             Guidelines:
             1. Allocate time for each goal based on the hours needed
-            2. Create a balanced schedule with breaks and transitions
+            2. Create a balanced schedule with breaks and transitions, aim for a 15 min break approximately every 1-2 hours
             3. Prioritize activities with closer deadlines or higher pledges
             4. If there's not enough time for all goals, prioritize and explain why
+            5. A goal can only be split by break blocks; otherwise keep it continuous (no interleaving)
+            6. Prefer 15-minute rounded times, feel free to overschedule to make this work
 
             YOU MUST FOLLOW THIS EXACT FORMAT:
 
@@ -64,9 +66,11 @@ class LLMScheduler:
             8:00 AM - 9:30 AM: Morning coding session (Programming)
             9:30 AM - 9:45 AM: Break
             9:45 AM - 11:15 AM: Continue coding (Programming)
-            11:15 AM - 12:00 PM: Read documentation (Reading)
+            11:15 AM - 12:00 PM: Read (Reading)
             12:00 PM - 1:00 PM: Lunch break
             ```
+
+            The activity name should be contextual.
 
             After the schedule, include a section titled "Notes:" with a brief explanation.
 
@@ -112,7 +116,8 @@ class LLMScheduler:
                     {"role": "system", "content": "Hello"},
                     {"role": "user", "content": "Test"}
                 ],
-                max_tokens=10
+                max_tokens=10,
+                temperature=0.0
             )
             return True
         except Exception as e:
@@ -299,7 +304,8 @@ class LLMScheduler:
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
-                ]
+                ],
+                temperature=0.0
             )
 
             raw_refined_schedule = response.choices[0].message.content

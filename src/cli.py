@@ -10,8 +10,9 @@ from typing import Dict
 
 from beeminder_api import BeeminderAPI
 from scheduler import BeeminderScheduler
-from ui import console, get_credentials, display_goals, display_scheduled_goals, display_requirements
+from ui import console, get_credentials, display_goals, display_scheduled_goals, display_requirements, display_schedule
 from interactive import start_interactive_mode
+from llm_scheduler import LLMScheduler
 
 CONFIG_FILE = os.path.expanduser("~/.beeminder-schedule.json")
 
@@ -197,6 +198,65 @@ def interactive():
         console.print("\n[yellow]Exiting interactive mode...[/yellow]")
     except Exception as e:
         console.print(f"[bold red]❌ Error: {e}[/bold red]")#!/usr/bin/env python3
+
+@cli.command()
+@click.option('--start-time', '-s', help='Start time for the schedule (e.g., "9:00 AM")')
+@click.option('--end-time', '-e', help='End time for the schedule (optional)')
+@click.option('--preferences', '-p', help='Special preferences or context for scheduling')
+def schedule(start_time, end_time, preferences):
+    """Generate a daily schedule from Beeminder goals"""
+    username, auth_token = get_credentials(CONFIG_FILE)
+    if not username or not auth_token:
+        return
+
+    api = BeeminderAPI(username, auth_token)
+    scheduler = BeeminderScheduler(api)
+    llm_scheduler = LLMScheduler(api, scheduler)
+
+    # Default start time to current rounded time if not provided
+    if not start_time:
+        from datetime import datetime
+        now = datetime.now()
+        minutes = now.minute
+        rounded_minutes = ((minutes + 14) // 15) * 15
+        if rounded_minutes >= 60:
+            rounded_time = now.replace(hour=now.hour + 1, minute=0, second=0, microsecond=0)
+        else:
+            rounded_time = now.replace(minute=rounded_minutes, second=0, microsecond=0)
+        start_time = rounded_time.strftime("%I:%M %p").lstrip('0')
+        console.print(f"[dim]Using default start time: {start_time}[/dim]")
+
+    try:
+        console.print("[bold]Fetching your Beeminder requirements...[/bold]")
+        requirements = scheduler.calculate_requirements()
+
+        if not requirements:
+            console.print("[bold yellow]No scheduled goals found.[/bold yellow]")
+            console.print("[dim]Add goals for scheduling first before generating a schedule.[/dim]")
+            return
+
+        console.print(f"[dim]Found {len(requirements)} goals to schedule[/dim]")
+
+        # Check if API key is configured
+        api_key = llm_scheduler.config.get('api_key', '')
+        if not api_key:
+            console.print("[yellow]API key not set up yet.[/yellow]")
+            api_key = llm_scheduler.setup_api_key()
+            if not api_key:
+                return
+
+        console.print("[bold]Generating your schedule...[/bold]")
+        schedule_text = llm_scheduler.generate_schedule(
+            requirements,
+            start_time,
+            end_time,
+            preferences or ""
+        )
+
+        display_schedule(schedule_text)
+
+    except Exception as e:
+        console.print(f"[bold red]❌ Error generating schedule: {e}[/bold red]")
 
 if __name__ == '__main__':
     cli()
