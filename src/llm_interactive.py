@@ -103,11 +103,23 @@ def generate_daily_schedule(llm_scheduler: LLMScheduler) -> None:
 
     console.print(Panel(f"[bold]Found {len(requirements)} goals to schedule[/bold]", border_style="green"))
 
-    # Get start time
+    # Get start time (empty means round up to nearest 15 minutes)
     time_completer = WordCompleter(['9:00', '9:00 AM', '8:30', '8:00', '7:30', '7:00'])
+    now = datetime.now()
+    # Round up to nearest 15 minutes
+    minutes = now.minute
+    rounded_minutes = ((minutes + 14) // 15) * 15  # Round up to next 15-min increment
+    if rounded_minutes >= 60:
+        rounded_time = now.replace(hour=now.hour + 1, minute=0, second=0, microsecond=0)
+    else:
+        rounded_time = now.replace(minute=rounded_minutes, second=0, microsecond=0)
+    default_start_time = rounded_time.strftime("%I:%M %p").lstrip('0')  # e.g., "3:00 PM"
 
     while True:
-        start_time = prompt("Start time for today's schedule: ", completer=time_completer)
+        start_time = prompt(f"Start time for today's schedule (empty for {default_start_time}): ", completer=time_completer)
+        if not start_time:  # If empty, use rounded time
+            start_time = default_start_time
+            break
         if validate_time_format(start_time):
             break
         console.print("[yellow]Invalid time format. Try something like '9:00 AM' or '9:00'.[/yellow]")

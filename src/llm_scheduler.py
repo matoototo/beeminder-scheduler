@@ -184,8 +184,8 @@ class LLMScheduler:
         ])
 
         user_prompt = f"Today's date: {current_date}\nStart time: {start_time}"
-        if end_time:
-            user_prompt += f", End time: {end_time}"
+        if end_time: user_prompt += f", End time: {end_time}"
+        else: user_prompt += ", End time: Any time, including next day AM"
 
         user_prompt += f"\n\nGoals to schedule:\n{goals_text}"
 
