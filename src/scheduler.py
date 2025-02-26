@@ -89,9 +89,9 @@ class BeeminderScheduler:
         return result
 
     def calculate_requirements(self, days_ahead: int = 7) -> Dict[str, Dict]:
-        """Calculate scheduling requirements for the configured goals"""
         scheduled_goals = self.get_scheduled_goals()
         result = {}
+        current_time = datetime.now()
 
         for slug, goal in scheduled_goals.items():
             try:
@@ -101,14 +101,11 @@ class BeeminderScheduler:
                 # Get critical values
                 losedate = goal_data.get('losedate', 0)
                 deadline = datetime.fromtimestamp(losedate) if losedate else datetime.now() + timedelta(days=365)
-
                 current_value = goal_data.get('curval')
-                target_value = goal_data.get('goalval')
                 safebuf = goal_data.get('safebuf', 0)  # Days of safety buffer
 
-                # Handle missing values - if curval or goalval is None, we can't calculate requirements
-                if current_value is None or target_value is None:
-                    # Include basic information but mark that we couldn't calculate requirements
+                # Handle missing current_value
+                if current_value is None:
                     result[slug] = {
                         'calendar_name': goal.calendar_name,
                         'deadline': deadline,
@@ -131,15 +128,23 @@ class BeeminderScheduler:
                 runits = goal_data.get('runits', 'd')  # Rate units (y/m/w/d/h)
                 yaw = goal_data.get('yaw', 1)  # +1/-1 = good side is above/below the line
                 limsum = goal_data.get('limsum', '')  # Summary of what you need to do
+                baremin = goal_data.get('baremin', '0')  # Bare minimum as string, default to '0'
 
-                # Calculate delta based on goal type
-                if yaw > 0:  # Do more goal (good side is above the line)
-                    delta = max(0, target_value - current_value)
-                else:  # Do less goal (good side is below the line)
-                    delta = max(0, current_value - target_value)
+                # Parse baremin string
+                try:
+                    if ':' in baremin:  # Time format, e.g., "+0:30"
+                        sign = -1 if baremin.startswith('-') else 1
+                        time_str = baremin.lstrip('+-')  # Remove sign
+                        hours, minutes = map(int, time_str.split(':'))
+                        delta = sign * (hours + minutes / 60.0)  # Convert to decimal hours
+                    else:  # Float or int format, e.g., "+1.2" or "-2"
+                        delta = float(baremin)  # Convert directly to float
+                except (ValueError, IndexError) as e:
+                    print(f"Error parsing baremin for {slug}: {baremin}, error: {e}")
+                    delta = 0
 
                 # Calculate hours needed
-                hours_needed = delta * goal.hours_per_unit
+                hours_needed = abs(delta) * goal.hours_per_unit  # Use absolute value for hours
 
                 # Calculate hours per day considering runits
                 # Convert rate to daily equivalent
@@ -165,7 +170,6 @@ class BeeminderScheduler:
                 result[slug] = {
                     'calendar_name': goal.calendar_name,
                     'current_value': current_value,
-                    'target_value': target_value,
                     'delta': delta,
                     'deadline': deadline,
                     'safebuf': safebuf,
