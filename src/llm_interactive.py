@@ -82,7 +82,6 @@ def generate_daily_schedule(llm_scheduler: LLMScheduler) -> None:
     console.clear()
     console.print("[bold cyan]Generate Daily Schedule[/bold cyan]")
 
-    # Check if the API key is set up
     api_key = llm_scheduler.config.get('api_key', '')
     if not api_key:
         console.print("[yellow]API key not set up yet.[/yellow]")
@@ -91,9 +90,8 @@ def generate_daily_schedule(llm_scheduler: LLMScheduler) -> None:
             prompt("\nPress Enter to continue... ")
             return
 
-    # Get requirements from the Beeminder scheduler
-    console.print("[dim]Fetching current Beeminder requirements...[/dim]")
-    requirements = llm_scheduler.beeminder_scheduler.calculate_requirements(days_ahead=7)
+    console.print("[dim]Fetching today's Beeminder requirements...[/dim]")
+    requirements = llm_scheduler.beeminder_scheduler.calculate_requirements()
 
     if not requirements:
         console.print("[bold yellow]No scheduled goals found.[/bold yellow]")
@@ -103,37 +101,32 @@ def generate_daily_schedule(llm_scheduler: LLMScheduler) -> None:
 
     console.print(Panel(f"[bold]Found {len(requirements)} goals to schedule[/bold]", border_style="green"))
 
-    # Get start time (empty means round up to nearest 15 minutes)
     time_completer = WordCompleter(['9:00', '9:00 AM', '8:30', '8:00', '7:30', '7:00'])
     now = datetime.now()
-    # Round up to nearest 15 minutes
     minutes = now.minute
-    rounded_minutes = ((minutes + 14) // 15) * 15  # Round up to next 15-min increment
+    rounded_minutes = ((minutes + 14) // 15) * 15
     if rounded_minutes >= 60:
         rounded_time = now.replace(hour=now.hour + 1, minute=0, second=0, microsecond=0)
     else:
         rounded_time = now.replace(minute=rounded_minutes, second=0, microsecond=0)
-    default_start_time = rounded_time.strftime("%I:%M %p").lstrip('0')  # e.g., "3:00 PM"
+    default_start_time = rounded_time.strftime("%I:%M %p").lstrip('0')
 
     while True:
         start_time = prompt(f"Start time for today's schedule (empty for {default_start_time}): ", completer=time_completer)
-        if not start_time:  # If empty, use rounded time
+        if not start_time:
             start_time = default_start_time
             break
         if validate_time_format(start_time):
             break
         console.print("[yellow]Invalid time format. Try something like '9:00 AM' or '9:00'.[/yellow]")
 
-    # Get end time (optional)
     end_time_completer = WordCompleter(['5:00 PM', '6:00 PM', '7:00 PM', '8:00 PM', '9:00 PM'])
-
     while True:
         end_time = prompt("End time (optional, press Enter to skip): ", completer=end_time_completer)
         if not end_time or validate_time_format(end_time):
             break
         console.print("[yellow]Invalid time format. Try something like '5:00 PM' or '17:00'.[/yellow]")
 
-    # Get user preferences or context (optional)
     console.print("\n[dim]Enter any preferences or context for your schedule.[/dim]")
     console.print("[dim]Examples: 'I need a lunch break around noon', 'I have a meeting at 2PM'[/dim]")
     console.print("[dim]Press Enter twice on an empty line when done.[/dim]")
@@ -147,7 +140,6 @@ def generate_daily_schedule(llm_scheduler: LLMScheduler) -> None:
 
     user_preferences = "\n".join(preferences)
 
-    # Generate the schedule
     console.print("\n[bold]Generating your schedule...[/bold]")
     schedule = llm_scheduler.generate_schedule(
         requirements,
@@ -156,7 +148,6 @@ def generate_daily_schedule(llm_scheduler: LLMScheduler) -> None:
         user_preferences
     )
 
-    # Display the schedule
     console.print(Panel(
         Markdown(schedule),
         title="Your Daily Schedule",
@@ -164,16 +155,13 @@ def generate_daily_schedule(llm_scheduler: LLMScheduler) -> None:
         box=box.ROUNDED
     ))
 
-    # Option to refine the schedule
     while True:
         console.print("\n[bold]Would you like to refine this schedule?[/bold]")
         refine_choice = prompt("Enter 'yes' to refine or 'no' to finish: ",
                              completer=WordCompleter(['yes', 'no']))
-
         if refine_choice.lower() != 'yes':
             break
 
-        # Get refinement feedback
         console.print("\n[dim]What would you like to change about this schedule?[/dim]")
         console.print("[dim]Examples: 'Move lunch to 1PM', 'Add more time for coding'[/dim]")
 
@@ -186,11 +174,9 @@ def generate_daily_schedule(llm_scheduler: LLMScheduler) -> None:
 
         feedback_text = "\n".join(feedback)
 
-        # Generate refined schedule
         console.print("\n[bold]Refining your schedule...[/bold]")
         schedule = llm_scheduler.refine_schedule(schedule, feedback_text)
 
-        # Display the refined schedule
         console.print(Panel(
             Markdown(schedule),
             title="Your Refined Schedule",

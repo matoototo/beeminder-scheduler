@@ -88,100 +88,58 @@ class BeeminderScheduler:
             )
         return result
 
-    def calculate_requirements(self, days_ahead: int = 7) -> Dict[str, Dict]:
+    def calculate_requirements(self) -> Dict[str, Dict]:
         scheduled_goals = self.get_scheduled_goals()
         result = {}
         current_time = datetime.now()
 
         for slug, goal in scheduled_goals.items():
             try:
-                # Get detailed goal data including the road
                 goal_data = self.api.get_goal(slug)
-
-                # Get critical values
                 losedate = goal_data.get('losedate', 0)
                 deadline = datetime.fromtimestamp(losedate) if losedate else datetime.now() + timedelta(days=365)
                 current_value = goal_data.get('curval')
-                safebuf = goal_data.get('safebuf', 0)  # Days of safety buffer
+                safebuf = goal_data.get('safebuf', 0)
 
-                # Handle missing current_value
                 if current_value is None:
                     result[slug] = {
                         'calendar_name': goal.calendar_name,
                         'deadline': deadline,
                         'safebuf': safebuf,
-                        'is_urgent': safebuf < days_ahead,
-                        'urgency': self._get_urgency_level(safebuf),
                         'hours_needed': 0,
                         'hours_per_day': 0,
-                        'delta': 0,
                         'pledge': goal_data.get('pledge', 0),
-                        'units': goal_data.get('gunits', ''),
                         'limsum': goal_data.get('limsum', 'Missing datapoints'),
                         'missing_data': True
                     }
                     continue
 
-                # Get more metadata
-                rate = goal_data.get('rate', 0)
-                pledge = goal_data.get('pledge', 0)
-                runits = goal_data.get('runits', 'd')  # Rate units (y/m/w/d/h)
-                yaw = goal_data.get('yaw', 1)  # +1/-1 = good side is above/below the line
-                limsum = goal_data.get('limsum', '')  # Summary of what you need to do
-                baremin = goal_data.get('baremin', '0')  # Bare minimum as string, default to '0'
-
-                # Parse baremin string
+                baremin = goal_data.get('baremin', '0')
                 try:
-                    if ':' in baremin:  # Time format, e.g., "+0:30"
+                    if ':' in baremin:
                         sign = -1 if baremin.startswith('-') else 1
-                        time_str = baremin.lstrip('+-')  # Remove sign
+                        time_str = baremin.lstrip('+-')
                         hours, minutes = map(int, time_str.split(':'))
-                        delta = sign * (hours + minutes / 60.0)  # Convert to decimal hours
-                    else:  # Float or int format, e.g., "+1.2" or "-2"
-                        delta = float(baremin)  # Convert directly to float
-                except (ValueError, IndexError) as e:
-                    print(f"Error parsing baremin for {slug}: {baremin}, error: {e}")
+                        delta = sign * (hours + minutes / 60.0)
+                    else:
+                        delta = float(baremin)
+                except (ValueError, IndexError):
                     delta = 0
 
-                # Calculate hours needed
-                hours_needed = abs(delta) * goal.hours_per_unit  # Use absolute value for hours
-
-                # Calculate hours per day considering runits
-                # Convert rate to daily equivalent
-                rate_per_day = rate
-                if runits == 'y':
-                    rate_per_day = rate / 365
-                elif runits == 'm':
-                    rate_per_day = rate / 30
-                elif runits == 'w':
-                    rate_per_day = rate / 7
-                elif runits == 'h':
-                    rate_per_day = rate * 24
-
-                # Calculate daily requirement (hours)
-                hours_per_day = abs(rate_per_day * goal.hours_per_unit)
-
-                # Is this urgent?
-                is_urgent = safebuf < days_ahead
-
-                # Determine urgency level (colors in Beeminder)
+                hours_needed = abs(delta) * goal.hours_per_unit
+                hours_per_day = hours_needed / max(safebuf, 1)
                 urgency = self._get_urgency_level(safebuf)
 
                 result[slug] = {
                     'calendar_name': goal.calendar_name,
-                    'current_value': current_value,
-                    'delta': delta,
                     'deadline': deadline,
                     'safebuf': safebuf,
-                    'is_urgent': is_urgent,
-                    'urgency': urgency,
                     'hours_needed': hours_needed,
                     'hours_per_day': hours_per_day,
-                    'pledge': pledge,
-                    'units': goal_data.get('gunits', ''),
-                    'rate': rate,
-                    'rate_per_day': rate_per_day,
-                    'limsum': limsum,
+                    'pledge': goal_data.get('pledge', 0),
+                    'limsum': goal_data.get('limsum', ''),
+                    'urgency': urgency,
+                    'delta': delta,
                     'missing_data': False
                 }
             except Exception as e:

@@ -98,20 +98,14 @@ def show_scheduling_requirements(scheduler: BeeminderScheduler) -> None:
     console.clear()
     console.print("[bold cyan]Scheduling Requirements[/bold cyan]")
 
-    days_input = prompt("Days to look ahead [7]: ", completer=WordCompleter(['7', '14', '30', '90']))
-    days = 7
-    if days_input and days_input.isdigit():
-        days = int(days_input)
-
-    console.print(f"[dim]Calculating requirements for the next {days} days...[/dim]")
-    requirements = scheduler.calculate_requirements(days_ahead=days)
+    console.print("[dim]Calculating today's requirements...[/dim]")
+    requirements = scheduler.calculate_requirements()
 
     if not requirements:
         console.print("[bold yellow]No scheduled goals found[/bold yellow]")
         prompt("\nPress Enter to continue... ")
         return
 
-    # Display requirements in a table
     table = Table(box=box.ROUNDED, show_header=True, header_style="bold cyan")
     table.add_column("Activity", style="bold")
     table.add_column("Units Needed", justify="right")
@@ -122,7 +116,6 @@ def show_scheduling_requirements(scheduler: BeeminderScheduler) -> None:
     table.add_column("Beeminder Says", justify="left")
 
     total_hours = 0
-
     for slug, data in requirements.items():
         deadline_str = data['deadline'].strftime("%Y-%m-%d")
         row_style = data['urgency']
@@ -143,8 +136,7 @@ def show_scheduling_requirements(scheduler: BeeminderScheduler) -> None:
         )
 
     console.print(table)
-    console.print(f"\n[bold]Total hours needed:[/bold] [cyan]{total_hours:.1f}[/cyan]")
-    console.print(f"[bold]Average hours per day:[/bold] [cyan]{(total_hours/days):.1f}[/cyan]")
+    console.print(f"\n[bold]Total hours needed today:[/bold] [cyan]{total_hours:.1f}[/cyan]")
     prompt("\nPress Enter to continue... ")
 
 def view_all_goals(api: BeeminderAPI, scheduler: BeeminderScheduler) -> None:

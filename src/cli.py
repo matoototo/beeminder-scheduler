@@ -129,9 +129,8 @@ def remove(slug):
         console.print(f"[bold red]❌ Error: {e}[/bold red]")
 
 @cli.command()
-@click.option('--days', type=int, default=7, help='Days to look ahead')
-def requirements(days):
-    """Show scheduling requirements for the next N days"""
+def requirements():
+    """Show scheduling requirements for today"""
     username, auth_token = get_credentials(CONFIG_FILE)
     if not username or not auth_token:
         return
@@ -140,9 +139,8 @@ def requirements(days):
     scheduler = BeeminderScheduler(api)
 
     try:
-        requirements_data = scheduler.calculate_requirements(days_ahead=days)
-        display_requirements(requirements_data, days)
-
+        requirements_data = scheduler.calculate_requirements()
+        display_requirements(requirements_data)
     except Exception as e:
         console.print(f"[bold red]❌ Error: {e}[/bold red]")
 

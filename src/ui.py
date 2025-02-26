@@ -141,12 +141,12 @@ def display_scheduled_goals(goals: Dict) -> None:
 
     console.print(table)
 
-def display_requirements(requirements: Dict, days: int) -> None:
+def display_requirements(requirements: Dict) -> None:
     if not requirements:
         console.print("[yellow]No scheduled goals found[/yellow]")
         return
 
-    table = Table(title="Units Needed to Avoid Derailment", box=box.ROUNDED, header_style="bold cyan")
+    table = Table(title="Units Needed Today", box=box.ROUNDED, header_style="bold cyan")
     table.add_column("Activity", style="bold")
     table.add_column("Units Needed", justify="right")
     table.add_column("Hours Needed", justify="right")
@@ -154,6 +154,7 @@ def display_requirements(requirements: Dict, days: int) -> None:
     table.add_column("Safe Days", justify="center")
     table.add_column("Pledge", justify="right")
     table.add_column("Beeminder Says", justify="left")
+    table.add_column("Hours/Day", justify="right")
 
     total_hours = 0
     for slug, data in requirements.items():
@@ -162,161 +163,17 @@ def display_requirements(requirements: Dict, days: int) -> None:
         deadline_str = data['deadline'].strftime("%Y-%m-%d")
         hours = data['hours_needed']
         total_hours += hours
-        table.add_row(
+        row = [
             data['calendar_name'],
-            f"{data['units_needed']:.1f}",
+            f"{data.get('delta', 0):.1f}",  # Use 'delta' instead of 'units_needed'
             f"{hours:.1f}",
             deadline_str,
             f"{data['safebuf']}",
             f"${data['pledge']}",
-            data['limsum'],
-            style="red" if data['safebuf'] == 0 else None
-        )
+            data['limsum']
+        ]
+        row.append(f"{data['hours_per_day']:.1f}")
+        table.add_row(*row, style="red" if data['safebuf'] == 0 else None)
 
     console.print(table)
-    console.print(f"[bold]Total hours needed:[/bold] [cyan]{total_hours:.1f}[/cyan]")
-
-def display_detailed_requirements(requirements: Dict, days: int) -> None:
-    """Display detailed scheduling requirements with more info"""
-    if not requirements:
-        console.print("[yellow]No scheduled goals found[/yellow]")
-        console.print("[dim]Use the 'add' command to add goals for scheduling.[/dim]")
-        return
-
-    # Filter out goals with actual calculated requirements vs those with missing data
-    valid_requirements = {slug: data for slug, data in requirements.items() if not data.get('missing_data', False)}
-    missing_data_goals = {slug: data for slug, data in requirements.items() if data.get('missing_data', False)}
-
-    # Prepare rich table for goals with valid data
-    if valid_requirements:
-        table = Table(
-            box=box.ROUNDED,
-            show_header=True,
-            header_style="bold cyan"
-        )
-
-        table.add_column("Activity", style="bold")
-        table.add_column("Units Needed", justify="right")
-        table.add_column("Hours Needed", justify="right")
-        table.add_column("Hours/Day", justify="right")
-        table.add_column("Buffer", justify="center")
-        table.add_column("Deadline", justify="center")
-        table.add_column("Beeminder Says", justify="left")
-
-        total_hours = 0
-
-        for slug, data in valid_requirements.items():
-            deadline_str = data['deadline'].strftime("%Y-%m-%d")
-
-            # Use the urgency level for styling
-            row_style = data['urgency']
-            buffer_days = data['safebuf']
-            buffer_text = f"{buffer_days} days"
-
-            hours = data['hours_needed']
-            total_hours += hours
-
-            table.add_row(
-                data['calendar_name'],
-                f"{data['delta']:.1f}",
-                f"{hours:.1f}",
-                f"{data['hours_per_day']:.1f}",
-                buffer_text,
-                deadline_str,
-                data.get('limsum', ''),
-                style=row_style
-            )
-
-        console.print(table)
-
-        # Show summary
-        console.print(f"\n[bold]Total hours needed:[/bold] [cyan]{total_hours:.1f}[/cyan]")
-        console.print(f"[bold]Average hours per day:[/bold] [cyan]{(total_hours/days):.1f}[/cyan]")
-
-    # Display a separate table for goals with missing data
-    if missing_data_goals:
-        table = Table(
-            title="Goals with Missing Data",
-            box=box.ROUNDED,
-            show_header=True,
-            header_style="bold yellow"
-        )
-
-        table.add_column("Activity", style="bold")
-        table.add_column("Buffer", justify="center")
-        table.add_column("Deadline", justify="center")
-        table.add_column("Status", justify="left")
-
-        for slug, data in missing_data_goals.items():
-            deadline_str = data['deadline'].strftime("%Y-%m-%d")
-            buffer_days = data['safebuf']
-            buffer_text = f"{buffer_days} days"
-
-            table.add_row(
-                data['calendar_name'],
-                buffer_text,
-                deadline_str,
-                "No data",
-                style=data['urgency']
-            )
-
-        console.print(table)
-        console.print("[dim]Note: These goals need datapoints or goal values to calculate scheduling requirements[/dim]")
-
-    # Add explanation of colors
-    console.print("\n[dim]Note: [red]Red rows[/red] indicate goals with deadlines within the next {days} days[/dim]")
-
-def display_detailed_requirements(requirements: Dict, days: int) -> None:
-    """Display detailed scheduling requirements with more info"""
-    if not requirements:
-        console.print("[yellow]No scheduled goals found[/yellow]")
-        console.print("[dim]Use the 'add' command to add goals for scheduling.[/dim]")
-        return
-
-    # Prepare rich table
-    table = Table(
-        box=box.ROUNDED,
-        show_header=True,
-        header_style="bold cyan"
-    )
-
-    table.add_column("Activity", style="bold")
-    table.add_column("Units Needed", justify="right")
-    table.add_column("Hours Needed", justify="right")
-    table.add_column("Hours/Day", justify="right")
-    table.add_column("Buffer", justify="center")
-    table.add_column("Deadline", justify="center")
-    table.add_column("Beeminder Says", justify="left")
-
-    total_hours = 0
-
-    for slug, data in requirements.items():
-        deadline_str = data['deadline'].strftime("%Y-%m-%d")
-
-        # Use the urgency level for styling
-        row_style = data['urgency']
-        buffer_days = data['safebuf']
-        buffer_text = f"{buffer_days} days"
-
-        hours = data['hours_needed']
-        total_hours += hours
-
-        table.add_row(
-            data['calendar_name'],
-            f"{data['delta']:.1f}",
-            f"{hours:.1f}",
-            f"{data['hours_per_day']:.1f}",
-            buffer_text,
-            deadline_str,
-            data.get('limsum', ''),
-            style=row_style
-        )
-
-    console.print(table)
-
-    # Show summary
-    console.print(f"\n[bold]Total hours needed:[/bold] [cyan]{total_hours:.1f}[/cyan]")
-    console.print(f"[bold]Average hours per day:[/bold] [cyan]{(total_hours/days):.1f}[/cyan]")
-
-    # Add explanation of colors
-    console.print("\n[dim]Note: [red]Red rows[/red] indicate goals with deadlines within the next {days} days[/dim]")
+    console.print(f"[bold]Total hours needed today:[/bold] [cyan]{total_hours:.1f}[/cyan]")
