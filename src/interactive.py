@@ -3,6 +3,8 @@ Interactive mode for Beeminder Scheduler
 Implements the interactive menu system
 """
 
+import os
+import json
 from datetime import datetime
 from prompt_toolkit import prompt
 from prompt_toolkit.completion import WordCompleter
@@ -12,8 +14,10 @@ from rich import box
 
 from beeminder_api import BeeminderAPI
 from scheduler import BeeminderScheduler
+from schedule_utils import get_last_schedule, LAST_SCHEDULE_FILE
 from ui import console
 from llm_interactive import start_llm_interactive_mode
+from google_calendar import GoogleCalendarAPI, setup_google_calendar
 
 def start_interactive_mode(api: BeeminderAPI, scheduler: BeeminderScheduler) -> None:
     try:
@@ -71,10 +75,11 @@ def show_interactive_menu(api: BeeminderAPI, scheduler: BeeminderScheduler) -> N
         console.print("4. [yellow]Edit goal settings[/yellow]")
         console.print("5. [magenta]Show scheduling requirements[/magenta]")
         console.print("6. [cyan]LLM Schedule Generator[/cyan]")
+        console.print("7. [green]Google Calendar Integration[/green]")
         console.print("0. [white]Exit[/white]")
 
-        choice = prompt("\nEnter your choice (0-6): ",
-                      completer=WordCompleter(['0', '1', '2', '3', '4', '5', '6']))
+        choice = prompt("\nEnter your choice (0-7): ",
+                      completer=WordCompleter(['0', '1', '2', '3', '4', '5', '6', '7']))
 
         if choice == "0":
             break
@@ -90,9 +95,176 @@ def show_interactive_menu(api: BeeminderAPI, scheduler: BeeminderScheduler) -> N
             show_scheduling_requirements(scheduler)
         elif choice == "6":
             start_llm_interactive_mode(api, scheduler)
+        elif choice == "7":
+            show_google_calendar_menu(api, scheduler)
         else:
             console.print("[bold red]Invalid choice![/bold red]")
             prompt("\nPress Enter to continue... ")
+
+def show_google_calendar_menu(api: BeeminderAPI, scheduler: BeeminderScheduler) -> None:
+    """Show the Google Calendar integration menu"""
+    while True:
+        console.clear()
+        console.print("[bold cyan]Google Calendar Integration[/bold cyan]")
+
+        # Check if we have a last generated schedule
+        has_schedule = os.path.exists(LAST_SCHEDULE_FILE)
+
+        console.print("\n[bold]What would you like to do?[/bold]")
+        console.print("1. [blue]Setup Google Calendar integration[/blue]")
+        console.print("2. [green]List available calendars[/green]")
+        if has_schedule:
+            console.print("3. [cyan]Push current schedule to Google Calendar[/cyan]")
+        console.print("0. [white]Return to main menu[/white]")
+
+        max_choice = "3" if has_schedule else "2"
+        choice = prompt(f"\nEnter your choice (0-{max_choice}): ",
+                      completer=WordCompleter(['0', '1', '2'] + (['3'] if has_schedule else [])))
+
+        if choice == "0":
+            break
+        elif choice == "1":
+            setup_google_calendar()
+            prompt("\nPress Enter to continue... ")
+        elif choice == "2":
+            list_google_calendars(scheduler)
+        elif choice == "3" and has_schedule:
+            push_schedule_to_calendar(scheduler)
+        else:
+            console.print("[bold red]Invalid choice![/bold red]")
+            prompt("\nPress Enter to continue... ")
+
+def list_google_calendars(scheduler: BeeminderScheduler) -> None:
+    """List available Google Calendars and set default"""
+    console.clear()
+    console.print("[bold cyan]Google Calendars[/bold cyan]")
+
+    api = GoogleCalendarAPI()
+    if not api.authenticate():
+        console.print("[bold red]❌ Failed to authenticate with Google Calendar[/bold red]")
+        prompt("\nPress Enter to continue... ")
+        return
+
+    calendars = api.get_calendar_list()
+
+    if not calendars:
+        console.print("[yellow]No calendars found[/yellow]")
+        prompt("\nPress Enter to continue... ")
+        return
+
+    table = Table(box=box.ROUNDED, show_header=True, header_style="bold cyan")
+    table.add_column("#", style="dim", width=4)
+    table.add_column("Calendar ID", style="dim")
+    table.add_column("Name", style="bold")
+    table.add_column("Default", justify="center")
+
+    # Load config to check for default calendar
+    config_file = os.path.expanduser("~/.beeminder-schedule.json")
+    if os.path.exists(config_file):
+        with open(config_file, 'r') as f:
+            config = json.load(f)
+    else:
+        config = {}
+
+    default_calendar_id = config.get('google_calendar_id', '')
+
+    for i, calendar in enumerate(calendars, 1):
+        calendar_id = calendar.get('id', '')
+        is_default = calendar_id == default_calendar_id
+
+        table.add_row(
+            str(i),
+            calendar_id,
+            calendar.get('summary', ''),
+            "[bold green]✓[/bold green]" if is_default else ""
+        )
+
+    console.print(table)
+
+    # Prompt to set default
+    console.print("\n[dim]You can set a default calendar to use for all schedule pushes.[/dim]")
+    calendar_choice = prompt("Select calendar # to set as default (or 0 to return): ",
+                           completer=WordCompleter([str(i) for i in range(len(calendars) + 1)]))
+
+    if calendar_choice == "0" or not calendar_choice.isdigit():
+        return
+
+    calendar_index = int(calendar_choice) - 1
+    if calendar_index < 0 or calendar_index >= len(calendars):
+        console.print("[bold red]Invalid selection![/bold red]")
+        prompt("\nPress Enter to continue... ")
+        return
+
+    selected_calendar = calendars[calendar_index]
+    selected_id = selected_calendar.get('id', '')
+    selected_name = selected_calendar.get('summary', '')
+
+    config['google_calendar_id'] = selected_id
+    with open(config_file, 'w') as f:
+        json.dump(config, f, indent=2)
+
+    console.print(f"[bold green]✓ Set [bold]{selected_name}[/bold] as default calendar![/bold green]")
+    prompt("\nPress Enter to continue... ")
+
+def push_schedule_to_calendar(scheduler: BeeminderScheduler) -> None:
+    """Push the last generated schedule to Google Calendar"""
+    console.clear()
+    console.print("[bold cyan]Push Schedule to Google Calendar[/bold cyan]")
+
+    # Get the last generated schedule
+    schedule_text = get_last_schedule()
+    if not schedule_text:
+        console.print("[yellow]No recently generated schedule found[/yellow]")
+        console.print("[dim]Generate a schedule first using the LLM Schedule Generator[/dim]")
+        prompt("\nPress Enter to continue... ")
+        return
+
+    # Check if a default calendar is set
+    config_file = os.path.expanduser("~/.beeminder-schedule.json")
+    if os.path.exists(config_file):
+        with open(config_file, 'r') as f:
+            config = json.load(f)
+    else:
+        config = {}
+
+    default_calendar_id = config.get('google_calendar_id', '')
+
+    if not default_calendar_id:
+        console.print("[yellow]No default calendar is set[/yellow]")
+        console.print("[dim]Please select a default calendar first[/dim]")
+        list_google_calendars(scheduler)
+        return
+
+    # Authenticate with Google Calendar
+    api = GoogleCalendarAPI()
+    if not api.authenticate():
+        console.print("[bold red]❌ Failed to authenticate with Google Calendar[/bold red]")
+        prompt("\nPress Enter to continue... ")
+        return
+
+    # Confirm with user
+    console.print("[dim]Ready to push the current schedule to Google Calendar.[/dim]")
+    confirm = prompt("Do you want to continue? (yes/no): ",
+                   completer=WordCompleter(['yes', 'no']))
+
+    if confirm.lower() != 'yes':
+        console.print("[yellow]Operation cancelled.[/yellow]")
+        prompt("\nPress Enter to continue... ")
+        return
+
+    # Push schedule to calendar
+    console.print("[bold]Pushing schedule to Google Calendar...[/bold]")
+    events_created, errors = api.push_schedule_to_calendar(schedule_text, default_calendar_id)
+
+    if events_created > 0:
+        console.print(f"[bold green]✓ Successfully created {events_created} calendar events![/bold green]")
+
+    if errors:
+        console.print("[yellow]The following errors occurred:[/yellow]")
+        for error in errors:
+            console.print(f"- {error}")
+
+    prompt("\nPress Enter to continue... ")
 
 def show_scheduling_requirements(scheduler: BeeminderScheduler) -> None:
     console.clear()

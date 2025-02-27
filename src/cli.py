@@ -13,6 +13,7 @@ from scheduler import BeeminderScheduler
 from ui import console, get_credentials, display_goals, display_scheduled_goals, display_requirements, display_schedule
 from interactive import start_interactive_mode
 from llm_scheduler import LLMScheduler
+from google_calendar import GoogleCalendarAPI, setup_google_calendar
 
 CONFIG_FILE = os.path.expanduser("~/.beeminder-schedule.json")
 
@@ -168,19 +169,6 @@ def config():
     else:
         console.print(f"[yellow]⚠ Configuration file does not exist yet[/yellow]")
         console.print(f"[dim]Run the setup command or add a goal to create the configuration file[/dim]")
-    username, auth_token = get_credentials(CONFIG_FILE)
-    if not username or not auth_token:
-        return
-
-    api = BeeminderAPI(username, auth_token)
-    scheduler = BeeminderScheduler(api)
-
-    try:
-        start_interactive_mode(api, scheduler)
-    except KeyboardInterrupt:
-        console.print("\n[yellow]Exiting interactive mode...[/yellow]")
-    except Exception as e:
-        console.print(f"[bold red]❌ Error: {e}[/bold red]")
 
 @cli.command()
 def interactive():
@@ -197,7 +185,7 @@ def interactive():
     except KeyboardInterrupt:
         console.print("\n[yellow]Exiting interactive mode...[/yellow]")
     except Exception as e:
-        console.print(f"[bold red]❌ Error: {e}[/bold red]")#!/usr/bin/env python3
+        console.print(f"[bold red]❌ Error: {e}[/bold red]")
 
 @cli.command()
 @click.option('--start-time', '-s', help='Start time for the schedule (e.g., "9:00 AM")')
@@ -254,6 +242,194 @@ def schedule(start_time, end_time, preferences):
         )
 
         display_schedule(schedule_text)
+
+    except Exception as e:
+        console.print(f"[bold red]❌ Error generating schedule: {e}[/bold red]")
+
+# New Google Calendar commands
+@cli.group()
+def gcal():
+    """Google Calendar integration"""
+    pass
+
+@gcal.command()
+def setup():
+    """Set up Google Calendar integration"""
+    console.print("[bold cyan]Google Calendar Setup[/bold cyan]")
+    setup_google_calendar()
+
+@gcal.command()
+def calendars():
+    """List available Google Calendars"""
+    api = GoogleCalendarAPI()
+    if not api.authenticate():
+        console.print("[bold red]❌ Failed to authenticate with Google Calendar[/bold red]")
+        return
+
+    calendars = api.get_calendar_list()
+
+    if not calendars:
+        console.print("[yellow]No calendars found[/yellow]")
+        return
+
+    console.print("[bold]Your Google Calendars:[/bold]")
+
+    from rich.table import Table
+    from rich import box
+
+    table = Table(box=box.ROUNDED, show_header=True, header_style="bold cyan")
+    table.add_column("#", style="dim", width=4)
+    table.add_column("Calendar ID", style="dim")
+    table.add_column("Name", style="bold")
+    table.add_column("Primary", justify="center")
+
+    for i, calendar in enumerate(calendars, 1):
+        table.add_row(
+            str(i),
+            calendar.get('id', ''),
+            calendar.get('summary', ''),
+            "✓" if calendar.get('primary', False) else ""
+        )
+
+    console.print(table)
+
+    # Save primary calendar ID for future use
+    config = load_config()
+    primary_calendars = [cal for cal in calendars if cal.get('primary', False)]
+
+    if primary_calendars and not config.get('google_calendar_id'):
+        primary_id = primary_calendars[0].get('id')
+        config['google_calendar_id'] = primary_id
+        save_config(config)
+        console.print(f"[green]✓ Saved primary calendar as default: {primary_id}[/green]")
+
+@gcal.command()
+@click.option('--calendar-id', '-c', help='Google Calendar ID to use')
+def push(calendar_id):
+    """Push the last generated schedule to Google Calendar"""
+    # Get the last generated schedule
+    from interactive import get_last_schedule
+
+    schedule_text = get_last_schedule()
+    if not schedule_text:
+        console.print("[yellow]No recently generated schedule found[/yellow]")
+        console.print("[dim]Generate a schedule first using the 'schedule' command[/dim]")
+        return
+
+    # Get calendar ID
+    if not calendar_id:
+        config = load_config()
+        calendar_id = config.get('google_calendar_id')
+
+        if not calendar_id:
+            console.print("[yellow]No default calendar ID set[/yellow]")
+            console.print("[dim]Run 'gcal calendars' to set a default or specify with --calendar-id[/dim]")
+            return
+
+    api = GoogleCalendarAPI()
+    if not api.authenticate():
+        console.print("[bold red]❌ Failed to authenticate with Google Calendar[/bold red]")
+        return
+
+    console.print("[bold]Pushing schedule to Google Calendar...[/bold]")
+    events_created, errors = api.push_schedule_to_calendar(schedule_text, calendar_id)
+
+    if events_created > 0:
+        console.print(f"[bold green]✓ Successfully created {events_created} calendar events![/bold green]")
+
+    if errors:
+        console.print("[yellow]The following errors occurred:[/yellow]")
+        for error in errors:
+            console.print(f"- {error}")
+
+@cli.command()
+@click.option('--start-time', '-s', help='Start time for the schedule (e.g., "9:00 AM")')
+@click.option('--end-time', '-e', help='End time for the schedule (optional)')
+@click.option('--preferences', '-p', help='Special preferences or context for scheduling')
+@click.option('--push-to-calendar', '-c', is_flag=True, help='Push schedule to Google Calendar')
+@click.option('--calendar-id', help='Google Calendar ID to use')
+def today(start_time, end_time, preferences, push_to_calendar, calendar_id):
+    """Generate a schedule and optionally push to Google Calendar"""
+    username, auth_token = get_credentials(CONFIG_FILE)
+    if not username or not auth_token:
+        return
+
+    api = BeeminderAPI(username, auth_token)
+    scheduler = BeeminderScheduler(api)
+    llm_scheduler = LLMScheduler(api, scheduler)
+
+    # Default start time to current rounded time if not provided
+    if not start_time:
+        from datetime import datetime
+        now = datetime.now()
+        minutes = now.minute
+        rounded_minutes = ((minutes + 14) // 15) * 15
+        if rounded_minutes >= 60:
+            rounded_time = now.replace(hour=now.hour + 1, minute=0, second=0, microsecond=0)
+        else:
+            rounded_time = now.replace(minute=rounded_minutes, second=0, microsecond=0)
+        start_time = rounded_time.strftime("%I:%M %p").lstrip('0')
+        console.print(f"[dim]Using default start time: {start_time}[/dim]")
+
+    try:
+        console.print("[bold]Fetching your Beeminder requirements...[/bold]")
+        requirements = scheduler.calculate_requirements()
+
+        if not requirements:
+            console.print("[bold yellow]No scheduled goals found.[/bold yellow]")
+            console.print("[dim]Add goals for scheduling first before generating a schedule.[/dim]")
+            return
+
+        console.print(f"[dim]Found {len(requirements)} goals to schedule[/dim]")
+
+        # Check if API key is configured
+        api_key = llm_scheduler.config.get('api_key', '')
+        if not api_key:
+            console.print("[yellow]API key not set up yet.[/yellow]")
+            api_key = llm_scheduler.setup_api_key()
+            if not api_key:
+                return
+
+        console.print("[bold]Generating your schedule...[/bold]")
+        schedule_text = llm_scheduler.generate_schedule(
+            requirements,
+            start_time,
+            end_time,
+            preferences or ""
+        )
+
+        from interactive import save_last_schedule
+        save_last_schedule(schedule_text)
+
+        display_schedule(schedule_text)
+
+        # Push to Google Calendar if requested
+        if push_to_calendar:
+            # Get calendar ID
+            if not calendar_id:
+                config = load_config()
+                calendar_id = config.get('google_calendar_id')
+
+                if not calendar_id:
+                    console.print("[yellow]No default calendar ID set[/yellow]")
+                    console.print("[dim]Run 'gcal calendars' to set a default or specify with --calendar-id[/dim]")
+                    return
+
+            api = GoogleCalendarAPI()
+            if not api.authenticate():
+                console.print("[bold red]❌ Failed to authenticate with Google Calendar[/bold red]")
+                return
+
+            console.print("[bold]Pushing schedule to Google Calendar...[/bold]")
+            events_created, errors = api.push_schedule_to_calendar(schedule_text, calendar_id)
+
+            if events_created > 0:
+                console.print(f"[bold green]✓ Successfully created {events_created} calendar events![/bold green]")
+
+            if errors:
+                console.print("[yellow]The following errors occurred:[/yellow]")
+                for error in errors:
+                    console.print(f"- {error}")
 
     except Exception as e:
         console.print(f"[bold red]❌ Error generating schedule: {e}[/bold red]")
